@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Мобильная Галактика Добрых Слов</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #010105;
+            font-family: sans-serif;
+            position: fixed; /* Убирает лишние скроллы и рывки на мобильных */
+            touch-action: none; /* Отключает стандартные жесты браузера для идеального контроля 3D */
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .ui-hint {
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 13px;
+            pointer-events: none;
+            user-select: none;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.65);
+            padding: 10px 18px;
+            border-radius: 20px;
+            backdrop-filter: blur(6px);
+            width: 85%;
+            max-width: 320px;
+            line-height: 1.4;
+        }
+    </style>
+    <!-- Подключаем Three.js и OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div class="ui-hint">✨ Ведите пальцем для вращения<br>🔍 Сведите/разведите пальцы для зума</div>
+
+    <script>
+        // --- Список нежных и добрых слов ---
+        const words = [
+            "любовь", "нежность", "добро", "тепло", "счастье", "милая", "свет", 
+            "душа", "улыбка", "радость", "чудо", "забота", "покой", "красота", 
+            "ласка", "мечта", "родная", "солнце", "вдохновение", "гармония", 
+            "уют", "сердце", "ангел", "вечность", "магия", "тишина", "благодарность",
+            "верность", "сияние", "объятия", "звёзды", "искренность", "сказка"
+        ];
+
+        const colors = ['#ffb7c5', '#b5ead7', '#c7ceea', '#e2f0cb', '#ffdac1', '#ffd1dc', '#ffffff', '#a1c4fd'];
+
+        // --- Инициализация с оптимизацией под мобильные экраны ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x010105, 0.007);
+
+        const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        // На узком экране отдаляем камеру, чтобы вся ширина галактики помещалась в кадр.
+        // Сама галактика, её частицы и композиция не меняются.
+        function fitGalaxyToScreen() {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = aspect;
+            if (aspect < 0.8) {
+                const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+                const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
+                const distance = 43 * 1.12 / Math.tan(horizontalFov / 2);
+                camera.position.set(0, distance * 0.5145, distance * 0.8575);
+            } else {
+                camera.position.set(0, 30, 50);
+            }
+            camera.updateProjectionMatrix();
+        }
+        fitGalaxyToScreen();
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Ограничиваем PixelRatio до 2, чтобы телефоны не тратили батарею и не перегревались
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // --- Управление касаниями ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 150;
+        controls.minDistance = 2;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.4;
+
+        // Функция создания текстуры для слова
+        function createWordTexture(text, colorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.shadowColor = colorHex;
+            ctx.shadowBlur = 10;
+            ctx.font = 'Bold 26px Arial, sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        // Кэшируем текстуры
+        const wordTextures = words.map(word => {
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            return createWordTexture(word, color);
+        });
+
+        const galaxyGroup = new THREE.Group();
+        scene.add(galaxyGroup);
+
+        const count = 1500; // Идеальный баланс красоты и производительности для смартфонов
+        const arms = 3;
+        const radius = 38;
+
+        // Генерация спиральной галактики
+        for (let i = 0; i < count; i++) {
+            const texture = wordTextures[Math.floor(Math.random() * wordTextures.length)];
+            
+            const material = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+
+            const sprite = new THREE.Sprite(material);
+
+            const r = Math.pow(Math.random(), 1.3) * radius;
+            const armIndex = i % arms;
+            const armAngle = (armIndex / arms) * Math.PI * 2;
+            const spinAngle = r * 0.4;
+
+            const x = Math.cos(armAngle + spinAngle) * r + (Math.random() - 0.5) * 5;
+            const y = (Math.random() - 0.5) * 3.5;
+            const z = Math.sin(armAngle + spinAngle) * r + (Math.random() - 0.5) * 5;
+
+            sprite.position.set(x, y, z);
+
+            const scale = Math.random() * 0.8 + 0.6;
+            sprite.scale.set(scale * 3.2, scale * 0.8, 1);
+
+            galaxyGroup.add(sprite);
+        }
+
+        // --- Цикл анимации ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const elapsedTime = clock.getElapsedTime();
+
+            galaxyGroup.rotation.y = elapsedTime * 0.025;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- Адаптация при повороте телефона ---
+        window.addEventListener('resize', () => {
+            fitGalaxyToScreen();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+    </script>
+</body>
+</html>
